@@ -1,0 +1,22 @@
+# 환경변수 (민감정보)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# LangGraph / 모델 캐시 (혹시 로컬에 다운로드되는 경우 대비)
+*.gguf
