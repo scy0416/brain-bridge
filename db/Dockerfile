@@ -20,4 +20,5 @@ RUN git clone --branch release/PG16/1.5.0 https://github.com/apache/age.git /tmp
 # AGE는 shared_preload_libraries 설정이 필요
 RUN echo "shared_preload_libraries = 'age'" >> /usr/share/postgresql/postgresql.conf.sample
 
-COPY init-extensions.sql /docker-entrypoint-initdb.d/
+COPY 01-init-extensions.sql /docker-entrypoint-initdb.d/
+COPY schema/02-schema.sql /docker-entrypoint-initdb.d/
