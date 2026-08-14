@@ -85,28 +85,91 @@ data/
 
 ## 사전 요구사항
 
-- Docker
-- Docker Compose
-- 여유 디스크 공간 약 10GB (모델 다운로드 포함)
+- **Docker Engine 20.10 이상** (`docker --version`으로 확인)
+- **Docker Compose v2** — `docker compose`(하이픈 없는 서브커맨드) 형태로 동작하는 버전이어야 합니다. `docker compose version`으로 확인하세요. 이 프로젝트의 `docker-compose.yml`은 최신 Compose Specification을 따르며 `version:` 필드를 명시하지 않습니다 — 구버전 `docker-compose`(v1, 하이픈 포함) 사용 시 정상 동작하지 않을 수 있습니다.
+- **메모리 최소 8GB, 권장 12GB 이상** — Gemma 4 E4B(4.5B) + BGE-M3 + PostgreSQL(pgvector/AGE)을 동시에 구동합니다. Windows에서 Docker Desktop(WSL2 백엔드) 사용 시, 기본 WSL2 메모리 할당(호스트 RAM의 50%)이 부족할 수 있으니 `%USERPROFILE%\.wslconfig`에서 별도로 늘려주는 것을 권장합니다:
+  ```ini
+  [wsl2]
+  memory=12GB
+  ```
+  적용 후 `wsl --shutdown` 실행 및 Docker Desktop 재시작이 필요합니다.
+- **여유 디스크 공간 약 10GB** (모델 다운로드 포함)
 
 ## 설치 및 실행
+
+### 빠른 시작
 
 ```bash
 # 1. 환경변수 설정
 cp .env.example .env
 
 # 2. 전체 스택 기동 (PostgreSQL, Ollama, MCP 서버, Open WebUI)
-docker compose up -d
+docker compose up -d --build
 
-# 3. 필요 모델 자동 다운로드 (최초 1회, 없으면 자동 실행)
-./scripts/pull-models.sh
-
-# 4. 데이터 적재 (정형 데이터 + 그래프 + 문서 임베딩)
+# 3. 데이터 적재 (정형 데이터 + 그래프 + 문서 임베딩)
 ./scripts/setup-data.sh
 
-# 5. Open WebUI 접속
+# 4. Open WebUI 접속
 # http://localhost:3000
 ```
+
+모델(Gemma 4 E4B, BGE-M3) 다운로드는 `ollama-init` 서비스가 `docker compose up` 시 자동으로 처리합니다 — 별도 스크립트를 수동 실행할 필요는 없습니다 (최초 실행 시 다운로드로 인해 몇 분 정도 소요될 수 있습니다).
+
+### 인프라 기동 절차 (단계별 상세)
+
+전체를 한 번에 띄우기보다 컴포넌트별로 순서대로 검증하고 싶다면 아래 순서를 따르세요.
+
+**1. PostgreSQL 기동 및 확장 확인**
+```bash
+docker compose up postgres -d --build
+docker compose logs postgres
+```
+로그에 `database system is ready to accept connections`가 보이면 정상입니다. 확장 설치 여부는 다음으로 확인합니다.
+```bash
+docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c "\dx"
+```
+`age`, `vector`, `plpgsql` 세 항목이 모두 나열되어야 합니다.
+
+**2. Ollama 기동 및 모델 확인**
+```bash
+docker compose up ollama ollama-init -d --build
+docker compose logs -f ollama-init
+```
+`ollama-init`은 모델 pull이 끝나면 자동 종료(`Exited (0)`)됩니다.
+```bash
+docker compose ps
+docker compose exec ollama ollama list
+```
+`gemma4:e4b`, `bge-m3`가 목록에 있어야 합니다.
+
+**3. 전체 스택 기동**
+```bash
+docker compose up -d --build
+docker compose ps
+```
+모든 서비스가 `Up`(또는 `ollama-init`은 `Exited (0)`) 상태인지 확인합니다.
+
+**4. 클린 재현 테스트 (권장)**
+심사·재현 목적으로 처음부터 다시 기동해도 동일하게 동작하는지 확인합니다.
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+### 트러블슈팅
+
+- **`docker compose up` 시 메모리 부족으로 컨테이너가 강제 종료(`signal: killed`)되는 경우**: 위 [사전 요구사항](#사전-요구사항)의 메모리 설정(`.wslconfig` 등)을 확인하세요.
+- **`.env`/`.sh` 파일을 Windows 에디터로 수정한 뒤 `$'\r': command not found` 등의 오류가 발생하는 경우**: 파일이 CRLF 줄바꿈으로 저장되어 발생하는 문제입니다. `sed -i 's/\r$//' <파일명>` 또는 `dos2unix <파일명>`으로 LF로 변환하세요.
+- **Ollama 응답이 몇 분씩 지연되는 경우**: 최초 요청 시 모델을 메모리에 로드하는 데 다소 시간이 걸릴 수 있습니다(수 분 소요 가능). 이후 요청부터는 `OLLAMA_KEEP_ALIVE=-1` 설정에 따라 모델이 계속 상주하여 빨라집니다.
+- **Apache AGE 관련 쿼리(`cypher()` 등)가 "function does not exist" 또는 "relation does not exist" 오류를 내는 경우**: AGE는 PostgreSQL 확장 특성상 **세션(커넥션)마다** 아래 두 줄을 먼저 실행해야 `ag_catalog` 스키마와 `cypher()` 함수가 인식됩니다.
+  ```sql
+  LOAD 'age';
+  SET search_path = ag_catalog, "$user", public;
+  ```
+  - `psql -f file.sql` 또는 `< file.sql`처럼 **한 세션 안에서 여러 쿼리를 순차 실행**하는 경우, 파일 맨 위에 한 번만 넣으면 이후 쿼리에 모두 적용됩니다.
+  - 반면 매번 새로운 접속(새 커넥션)으로 나눠서 쿼리를 실행하면, 접속할 때마다 이 두 줄을 다시 실행해야 합니다 — 이 설정은 세션에 종속되며 DB에 영구 저장되지 않습니다.
+  - 애플리케이션 코드(Python 등)에서 커넥션 풀을 사용할 경우, **매 커넥션 획득 시 위 두 줄을 초기화 쿼리로 실행**하도록 구현해야 합니다 (예: `psycopg2`/`asyncpg`의 커넥션 생성 콜백에 포함).
+  - `create_graph()`를 이미 실행한 그래프에 다시 실행하면 `graph "..." already exists` 오류가 납니다 — 정상적인 안내이며, 필요 시 `SELECT drop_graph('<그래프명>', true);`로 초기화 후 재실행하세요.
 
 ## 프로젝트 구조
 
