@@ -23,3 +23,4 @@ RUN echo "shared_preload_libraries = 'age'" >> /usr/share/postgresql/postgresql.
 COPY 01-init-extensions.sql /docker-entrypoint-initdb.d/
 COPY schema/02-schema.sql /docker-entrypoint-initdb.d/
 COPY schema/03-data.sql /docker-entrypoint-initdb.d/
+COPY schema/04-create-graph.sql /docker-entrypoint-initdb.d/
