@@ -97,10 +97,15 @@ def embed_chunks(
     start = time.time()
 
     for i, chunk in enumerate(chunks, start=1):
+        # 검색 정확도 개선: title_path(섹션 맥락)를 본문 앞에 붙여서 임베딩한다.
+        # DB에 저장되는 원문 content 자체는 바꾸지 않고, 임베딩 생성용 텍스트만 조합한다.
+        title_path = chunk.get("title_path", "")
+        embed_text = f"{title_path}\n{chunk['content']}" if title_path else chunk["content"]
+
         attempt = 0
         while True:
             try:
-                embedding = get_embedding(chunk["content"], model=model)
+                embedding = get_embedding(embed_text, model=model)
                 result.append({**chunk, "embedding": embedding})
                 break
             except EmbeddingError as e:
