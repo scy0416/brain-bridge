@@ -79,6 +79,27 @@ services:
       - ./data:/app/data
     command: ["bash", "scripts/load-graph.sh"]
     restart: "no"
+  
+  docs-init:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - OLLAMA_HOST=${OLLAMA_HOST}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./data:/app/data
+    command: ["python", "scripts/load_documents.py"]
+    restart: "no"
 
 volumes:
   pgdata:
