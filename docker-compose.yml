@@ -60,6 +60,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
+      - ./data:/app/data
   
   graph-init:
     build:
