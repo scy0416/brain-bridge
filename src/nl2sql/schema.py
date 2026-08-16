@@ -95,3 +95,37 @@ SCHEMA_TEXT = """\
 - created_at (티켓 생성일시, timestamp)
 - resolved_at (해결일시, timestamp, NULL 가능)
 """
+
+FK_SUMMARY = """\
+## 외래키(FK) 관계 요약
+
+- departments.head_id → employees.id (부서의 부서장)
+- employees.dept_id → departments.id (직원의 소속 부서)
+- contracts.client_id → clients.id (계약의 고객사)
+- contracts.product_id → products.id (계약의 제품)
+- contracts.manager_id → employees.id (계약 담당 직원)
+- projects.client_id → clients.id (프로젝트의 고객사)
+- projects.manager_id → employees.id (프로젝트 담당 직원)
+- projects.contract_id → contracts.id (프로젝트와 연관된 계약, NULL 가능)
+- sales.contract_id → contracts.id (매출이 발생한 계약)
+- sales.client_id → clients.id (매출의 고객사)
+- sales.product_id → products.id (매출의 제품)
+- support_tickets.client_id → clients.id (티켓을 등록한 고객사)
+- support_tickets.product_id → products.id (티켓 대상 제품)
+- support_tickets.assignee_id → employees.id (티켓 담당 직원, NULL 가능)
+
+## 자주 쓰이는 조인 경로
+
+- 직원의 소속 부서: employees JOIN departments ON employees.dept_id = departments.id
+- 매출 상세(고객사/제품명 포함): sales JOIN clients ON sales.client_id = clients.id
+                                  JOIN products ON sales.product_id = products.id
+- 계약 상세(고객사/제품/담당자 포함): contracts JOIN clients ON contracts.client_id = clients.id
+                                     JOIN products ON contracts.product_id = products.id
+                                     JOIN employees ON contracts.manager_id = employees.id
+- 프로젝트 상세(고객사/담당자 포함): projects JOIN clients ON projects.client_id = clients.id
+                                    JOIN employees ON projects.manager_id = employees.id
+- 티켓 상세(고객사/제품/담당자 포함): support_tickets JOIN clients ON support_tickets.client_id = clients.id
+                                     JOIN products ON support_tickets.product_id = products.id
+                                     JOIN employees ON support_tickets.assignee_id = employees.id
+- 부서장 조회: departments JOIN employees ON departments.head_id = employees.id
+"""
