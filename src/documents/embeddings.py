@@ -5,6 +5,7 @@ Ollama의 /api/embeddings 엔드포인트를 호출해 텍스트를 BGE-M3 임�
 """
 
 import os
+import time
 from typing import List
 
 import requests
@@ -67,3 +68,62 @@ def get_embeddings_batch(texts: List[str], model: str = EMBEDDING_MODEL) -> List
     :return: 각 텍스트에 대응하는 임베딩 벡터 리스트
     """
     return [get_embedding(text, model=model) for text in texts]
+
+
+def embed_chunks(
+    chunks: List[dict],
+    model: str = EMBEDDING_MODEL,
+    progress_interval: int = 20,
+    max_retries: int = 2,
+) -> List[dict]:
+    """
+    문서 청크 리스트(load_all_chunks() 결과) 전체를 순차적으로 임베딩하고,
+    각 청크 dict에 "embedding" 필드를 추가해서 반환한다.
+
+    처리 방식: 순차(sequential) 호출.
+    - Ollama /api/embeddings가 프롬프트 1개씩만 처리하는 API라 진짜 배치가 불가능함
+    - 데이터 규모(수백 개)가 작아 순차 처리로도 충분히 짧은 시간에 끝남
+    - 실패 시 어느 청크에서 멈췄는지 추적하기 쉬움 (배치 병렬 처리 대비 디버깅 용이)
+
+    :param chunks: load_all_chunks()가 반환한 청크 dict 리스트
+    :param model: 사용할 임베딩 모델
+    :param progress_interval: 몇 개마다 진행 상황을 출력할지
+    :param max_retries: 개별 청크 임베딩 실패 시 재시도 횟수
+    :return: 각 청크에 "embedding" 키가 추가된 리스트
+    """
+    total = len(chunks)
+    result = []
+    failed = []
+    start = time.time()
+
+    for i, chunk in enumerate(chunks, start=1):
+        attempt = 0
+        while True:
+            try:
+                embedding = get_embedding(chunk["content"], model=model)
+                result.append({**chunk, "embedding": embedding})
+                break
+            except EmbeddingError as e:
+                attempt += 1
+                if attempt > max_retries:
+                    print(f"    ⚠️  실패 (재시도 {max_retries}회 초과): "
+                          f"[{chunk['doc_id']}#{chunk['chunk_index']}] {e}")
+                    failed.append(chunk)
+                    break
+                print(f"    재시도 {attempt}/{max_retries}: "
+                      f"[{chunk['doc_id']}#{chunk['chunk_index']}] {e}")
+
+        if i % progress_interval == 0 or i == total:
+            elapsed = time.time() - start
+            rate = i / elapsed if elapsed > 0 else 0
+            print(f"    진행: {i}/{total} ({elapsed:.1f}초 경과, {rate:.1f}개/초)")
+
+    elapsed_total = time.time() - start
+    print(f"    완료: 성공 {len(result)}개, 실패 {len(failed)}개, 총 {elapsed_total:.1f}초 소요")
+
+    if failed:
+        print("    실패한 청크 목록:")
+        for c in failed:
+            print(f"      - [{c['doc_id']}#{c['chunk_index']}] {c['title_path']}")
+
+    return result
