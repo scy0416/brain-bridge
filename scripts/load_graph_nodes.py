@@ -14,7 +14,14 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from graph.age_client import GRAPH_NAME, age_session, create_graph_if_not_exists, get_connection, run_cypher
+from graph.age_client import (
+    GRAPH_NAME,
+    age_session,
+    create_graph_if_not_exists,
+    get_connection,
+    run_cypher,
+    to_cypher_map,
+)
 
 NODES_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "graph", "nodes.json")
 
@@ -34,24 +41,6 @@ EXPECTED_COUNTS = {
     "Project": 40,
     "Department": 6,
 }
-
-
-def to_cypher_literal(value) -> str:
-    """파이썬 값을 Cypher 리터럴 문자열로 변환한다. (고정 데이터셋 대상이라 단순 이스케이프로 충분)"""
-    if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return "null"
-    return str(value)
-
-
-def to_cypher_map(props: dict) -> str:
-    """{key: value, ...} 형태의 Cypher 맵 리터럴 문자열을 만든다."""
-    parts = [f"{key}: {to_cypher_literal(val)}" for key, val in props.items()]
-    return "{" + ", ".join(parts) + "}"
 
 
 def reset_graph(conn):

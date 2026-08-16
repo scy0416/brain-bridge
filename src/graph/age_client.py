@@ -11,7 +11,7 @@ import json
 import os
 import re
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, List, Optional, Tuple
 
 import psycopg2
 
@@ -58,13 +58,31 @@ def parse_agtype(value: str) -> Any:
         return cleaned
 
 
+def to_cypher_literal(value: Any) -> str:
+    """파이썬 값을 Cypher 리터럴 문자열로 변환한다. (고정 데이터셋 대상이라 단순 이스케이프로 충분)"""
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def to_cypher_map(props: dict) -> str:
+    """{key: value, ...} 형태의 Cypher 맵 리터럴 문자열을 만든다."""
+    parts = [f"{key}: {to_cypher_literal(val)}" for key, val in props.items()]
+    return "{" + ", ".join(parts) + "}"
+
+
 def run_cypher(
     conn,
     cypher_query: str,
     return_cols: str = "v agtype",
     graph_name: str = GRAPH_NAME,
-    params: dict | None = None,
-) -> list[Any]:
+    params: Optional[dict] = None,
+) -> List[Tuple[Any, ...]]:
     """
     Cypher 쿼리를 실행하고, 각 결과 컬럼을 parse_agtype으로 파싱해서 반환한다.
 
