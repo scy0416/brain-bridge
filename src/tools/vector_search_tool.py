@@ -11,7 +11,7 @@ from documents.embeddings import get_embedding
 from documents.search import search_similar_chunks
 from documents.store import get_connection_with_vector
 
-DEFAULT_K = 5
+DEFAULT_K = 3
 
 
 def vector_search_tool(question: str, k: int = DEFAULT_K, doc_type: Optional[str] = None) -> dict:
