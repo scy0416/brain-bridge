@@ -17,8 +17,11 @@ from typing import Dict, Optional
 
 from graph.age_client import run_cypher
 
-CLIENT_PATTERN = re.compile(r"Client-[A-Z]{1,2}\b")
-PRODUCT_PATTERN = re.compile(r"Product-[A-Z]\d\b")
+# \b(단어 경계)는 "Client-A가"처럼 영문자 바로 뒤에 한글 조사가 붙으면
+# 유니코드 경계 인식이 불안정해 매칭에 실패할 수 있어, 뒤에 영문자/숫자가
+# 이어지지 않는지만 확인하는 부정형 전방탐색으로 대체한다.
+CLIENT_PATTERN = re.compile(r"Client-[A-Z]{1,2}(?![A-Za-z0-9])")
+PRODUCT_PATTERN = re.compile(r"Product-[A-Z]\d(?![A-Za-z0-9])")
 
 
 def _lookup_orig_id_by_exact_name(conn, label: str, name: str) -> Optional[str]:
