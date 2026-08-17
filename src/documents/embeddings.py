@@ -14,7 +14,7 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "bge-m3")
 EXPECTED_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
-REQUEST_TIMEOUT = 30  # 초
+REQUEST_TIMEOUT = 120  # 초 (웜업을 해도 예외적으로 콜드 스타트가 발생할 가능성까지 감안한 여유값)
 
 
 class EmbeddingError(Exception):

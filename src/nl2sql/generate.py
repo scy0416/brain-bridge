@@ -12,7 +12,7 @@ from nl2sql.prompt import SYSTEM_PROMPT, build_user_message
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemma4:e4b")
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 300  # 초 (웜업을 해도 예외적으로 콜드 스타트가 발생할 가능성까지 감안한 여유값)
 
 
 class SQLGenerationError(Exception):
