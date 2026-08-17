@@ -40,16 +40,27 @@ def format_query_result(columns: List[str], rows: List[Tuple], max_rows: int = M
     """
     total_count = len(rows)
     limited_rows = rows[:max_rows]
+    is_empty = total_count == 0
 
     records = [
         {col: _to_json_safe(val) for col, val in zip(columns, row)}
         for row in limited_rows
     ]
 
-    return {
+    result = {
         "row_count": total_count,
         "columns": columns,
         "rows": records,
         "truncated": total_count > max_rows,
-        "is_empty": total_count == 0,
+        "is_empty": is_empty,
     }
+
+    # 빈 결과는 "조회 실패"가 아니라 "조건에 맞는 데이터가 없음"이라는 걸
+    # Answer Agent가 명확히 구분해서 답변하도록 안내 문구를 별도로 붙인다.
+    if is_empty:
+        result["note"] = (
+            "조회는 정상적으로 실행되었으나 조건에 맞는 데이터가 없습니다. "
+            "이 사실을 사용자에게 명확히 안내하고, 데이터가 있다고 추측하거나 지어내지 마세요."
+        )
+
+    return result
