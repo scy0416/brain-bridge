@@ -59,7 +59,7 @@ MCP(Model Context Protocol) 기반 지능형 데이터 플랫폼 — 2026년 오
 
 | 구성 요소 | 선택 | 비고 |
 |---|---|---|
-| LLM | Gemma 4 E4B | Ollama 로컬 실행, Apache-2.0, function-calling 네이티브 지원 |
+| LLM | Gemma 4 E4B (기본), 사양 부족 시 E2B | Ollama 로컬 실행, Apache-2.0, function-calling 네이티브 지원 |
 | 임베딩 모델 | BGE-M3 | Ollama 로컬 실행, MIT, 1024차원, 한국어 검색 성능 우수 |
 | 벡터 검색 | pgvector | PostgreSQL 확장 |
 | 지식 그래프 | Apache AGE | PostgreSQL 확장 (별도 그래프 DB 서비스 없이 단일 DB로 통합) |
@@ -67,7 +67,29 @@ MCP(Model Context Protocol) 기반 지능형 데이터 플랫폼 — 2026년 오
 | 에이전트 오케스트레이션 | LangGraph | Base Agent(질문/비질문 게이트) → Router Agent → Answer Agent로 이어지는 멀티 에이전트 구조 |
 | 실행 인터페이스 | Open WebUI | FastAPI 어댑터를 통해 OpenAI 호환 API로 연동 |
 
+### LLM 모델: 기본 Gemma 4 E4B, 사양 부족 시 E2B로 낮추기
+
+기본 LLM은 **Gemma 4 E4B**(공식 Q4_K_M 양자화, 약 9.4~9.6GB)입니다. Router Agent의 function-calling, NL2SQL 쿼리 생성 정확도가 가장 좋아 기본값으로 유지합니다.
+
+다만 이 크기는 로컬 환경에서 상시 메모리 부담이 있을 수 있습니다 — Gemma 4의 PLE(Per-Layer Embeddings) 아키텍처 특성상 양자화를 해도 임베딩 테이블 부분이 커서, `OLLAMA_KEEP_ALIVE`를 길게 두면 항상 9GB 이상을 점유합니다. (기본 설정은 `OLLAMA_KEEP_ALIVE=30m`로, 30분간 미사용 시 자동으로 메모리를 반납하도록 절충해두었습니다.)
+
+**메모리가 부족한 환경(예: 8GB대 여유 RAM)에서는 Gemma 4 E2B(약 6.7GB)로 낮춰서 실행할 수 있습니다.** E2B로도 Router Agent의 tool-calling과 NL2SQL SQL 생성 모두에서 이렇다 할 정확도 저하 없이 정상 동작하는 것을 확인했습니다. 전환 방법:
+
+```bash
+# .env에서 아래 값을 수정 후 재기동
+LLM_MODEL=gemma4:e2b
+```
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+(서드파티 재양자화 모델(예: `batiai/gemma4-e4b:q4`, 약 5.3GB)도 검토했으나, 출처가 불명확해지고 대회 규정상 AI 모델 활용 내역서에 별도 소명이 필요해지는 점을 고려해 공식 배포 모델(E4B/E2B) 범위 내에서 해결하는 쪽을 택했습니다.)
+
 ## 데이터셋
+
+
 
 `data/` 디렉토리에 [companyx-dataset-v1.0.zip](https://liwonace.co.kr/blog/9)(가상 IT 솔루션 기업 "Company-X"의 운영 데이터) 원본을 포함하고 있습니다. 대회 측으로부터 데이터셋 원본을 공개 저장소에 포함해도 좋다는 서면(이메일) 확인을 받았습니다.
 
@@ -97,14 +119,14 @@ data/
 이 분석 결과, 문서 타입별로 별도 파싱 규칙을 만들 필요 없이 **h2/h3를 범용적으로 청크 경계로 삼는 단일 로직**(`src/documents/chunker.py`)으로 4가지 타입 전부를 올바르게 처리할 수 있음을 확인했습니다.
 
 - 각 청크는 `title_path`(예: `"Product-C1 설치 가이드 > 설치 절차 > 1단계: 의존성 설치"`)로 상위 맥락을 보존합니다.
-- 청크 길이 상한(800자, 초과 시 문단 단위 추가 분할) / 하한(10자, 미달 시 직전 청크에 병합)을 둡니다.
+- 청크 길이 상한(800자, 초과 시 문단 단위 추가 분할) / 하한(10자, 미달 시 직전 청크에 병합)을 둡니다. 이 데이터셋의 실제 청크 길이는 25~161자로 두 임계값 모두 발동하지 않는 여유 있는 안전선입니다 — 지금 당장 유효한 제약이라기보다, 데이터셋이 바뀌거나 더 긴/짧은 섹션이 섞여도 파이프라인이 깨지지 않도록 하는 방어적 설정입니다.
 - 실제 적재 결과: 40개 문서 → 총 200개 청크 (문서당 평균 5.0개, 최소 3 / 최대 6), 청크당 평균 69자.
 
 ## 사전 요구사항
 
 - **Docker Engine 20.10 이상** (`docker --version`으로 확인)
 - **Docker Compose v2** — `docker compose`(하이픈 없는 서브커맨드) 형태로 동작하는 버전이어야 합니다. `docker compose version`으로 확인하세요. 이 프로젝트의 `docker-compose.yml`은 최신 Compose Specification을 따르며 `version:` 필드를 명시하지 않습니다 — 구버전 `docker-compose`(v1, 하이픈 포함) 사용 시 정상 동작하지 않을 수 있습니다.
-- **메모리 최소 8GB, 권장 12GB 이상** — Gemma 4 E4B(4.5B) + BGE-M3 + PostgreSQL(pgvector/AGE)을 동시에 구동합니다. Windows에서 Docker Desktop(WSL2 백엔드) 사용 시, 기본 WSL2 메모리 할당(호스트 RAM의 50%)이 부족할 수 있으니 `%USERPROFILE%\.wslconfig`에서 별도로 늘려주는 것을 권장합니다:
+- **메모리 최소 8GB, 권장 12GB 이상** — Gemma 4 E4B(4.5B, 사양 부족 시 E2B로 낮춤 가능) + BGE-M3 + PostgreSQL(pgvector/AGE)을 동시에 구동합니다. Windows에서 Docker Desktop(WSL2 백엔드) 사용 시, 기본 WSL2 메모리 할당(호스트 RAM의 50%)이 부족할 수 있으니 `%USERPROFILE%\.wslconfig`에서 별도로 늘려주는 것을 권장합니다:
   ```ini
   [wsl2]
   memory=12GB
@@ -216,7 +238,7 @@ docker compose up -d --build
 
 ## AI 모델 활용 내역
 
-본 프로젝트는 로컬 오픈웨이트 모델(Gemma 4 E4B, BGE-M3)만을 사용하며 외부 API 호출 없이 동작합니다. 개발 과정에서 Claude(Anthropic)를 코드 작성 및 설계 논의 보조 도구로 활용했습니다. 자세한 내용은 대회 지정 서식의 AI 모델 활용 내역서를 참고해 주세요.
+본 프로젝트는 로컬 오픈웨이트 모델(Gemma 4 E4B(또는 저사양 환경에서는 E2B), BGE-M3)만을 사용하며 외부 API 호출 없이 동작합니다. 개발 과정에서 Claude(Anthropic)를 코드 작성 및 설계 논의 보조 도구로 활용했습니다. 자세한 내용은 대회 지정 서식의 AI 모델 활용 내역서를 참고해 주세요.
 
 ## 대회 정보
 
