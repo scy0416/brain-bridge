@@ -10,6 +10,7 @@ from typing import List
 
 from graph.age_client import run_cypher
 from graph.cypher_templates import (
+    in_progress_projects_led,
     one_hop_forward,
     one_hop_reverse,
     relation_count_by_source,
@@ -64,3 +65,11 @@ def query_two_hop_client_projects_via_product(conn, product_orig_id: str) -> dic
     rows = run_cypher(conn, cypher, return_cols="client_name agtype, project_name agtype")
     results = [{"client_name": c, "project_name": p} for c, p in rows]
     return format_kg_result(results, "two_hop", relation="USES+HAS_PROJECT")
+
+
+def query_in_progress_projects_led(conn) -> dict:
+    """특수 패턴 실행: 진행 중인 프로젝트를 이끄는 직원 전체 목록을 반환한다 (엔티티 불필요)."""
+    cypher = in_progress_projects_led()
+    rows = run_cypher(conn, cypher, return_cols="employee_name agtype, project_name agtype")
+    results = [{"employee_name": e, "project_name": p} for e, p in rows]
+    return format_kg_result(results, "special_leads_in_progress", relation="LEADS")

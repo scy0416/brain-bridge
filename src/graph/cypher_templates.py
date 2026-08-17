@@ -94,6 +94,17 @@ def two_hop_client_projects_via_product(product_orig_id: str) -> str:
     )
 
 
+def in_progress_projects_led() -> str:
+    """
+    특수 패턴: 엔티티 없이, 진행 중(status='in_progress')인 프로젝트를 이끄는
+    직원 전체 목록을 조회한다. (questions.json 실측: "진행 중인 프로젝트를 이끄는 직원 목록")
+    """
+    return (
+        'MATCH (e:Employee)-[:LEADS]->(p:Project {status: "in_progress"}) '
+        "RETURN e.name AS employee_name, p.name AS project_name"
+    )
+
+
 def two_hop_generic(
     relation_1: str,
     relation_1_direction: str,
