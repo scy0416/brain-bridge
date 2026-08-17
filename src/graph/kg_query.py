@@ -16,6 +16,7 @@ from graph.cypher_templates import (
     relation_count_by_target,
     two_hop_client_projects_via_product,
 )
+from graph.kg_format import format_kg_result
 
 
 def _vertex_to_dict(vertex: dict) -> dict:
@@ -25,36 +26,41 @@ def _vertex_to_dict(vertex: dict) -> dict:
     return props
 
 
-def query_one_hop_forward(conn, relation: str, source_orig_id: str) -> List[dict]:
+def query_one_hop_forward(conn, relation: str, source_orig_id: str) -> dict:
     """정방향 1-hop 실행: 특정 출발 정점과 연결된 도착 정점 목록을 반환한다."""
     cypher = one_hop_forward(relation, source_orig_id)
     rows = run_cypher(conn, cypher, return_cols="b agtype")
-    return [_vertex_to_dict(row[0]) for row in rows]
+    results = [_vertex_to_dict(row[0]) for row in rows]
+    return format_kg_result(results, "one_hop_forward", relation=relation)
 
 
-def query_one_hop_reverse(conn, relation: str, target_orig_id: str) -> List[dict]:
+def query_one_hop_reverse(conn, relation: str, target_orig_id: str) -> dict:
     """역방향 1-hop 실행: 특정 도착 정점과 연결된 출발 정점 목록을 반환한다."""
     cypher = one_hop_reverse(relation, target_orig_id)
     rows = run_cypher(conn, cypher, return_cols="a agtype")
-    return [_vertex_to_dict(row[0]) for row in rows]
+    results = [_vertex_to_dict(row[0]) for row in rows]
+    return format_kg_result(results, "one_hop_reverse", relation=relation)
 
 
-def query_count_by_target(conn, relation: str, limit: int = 5) -> List[dict]:
+def query_count_by_target(conn, relation: str, limit: int = 5) -> dict:
     """관계 카운트 집계(도착 정점 기준): [{"name": ..., "count": ...}, ...] 반환."""
     cypher = relation_count_by_target(relation, limit=limit)
     rows = run_cypher(conn, cypher, return_cols="name agtype, cnt agtype")
-    return [{"name": name, "count": count} for name, count in rows]
+    results = [{"name": name, "count": count} for name, count in rows]
+    return format_kg_result(results, "count_by_target", relation=relation)
 
 
-def query_count_by_source(conn, relation: str, limit: int = 5) -> List[dict]:
+def query_count_by_source(conn, relation: str, limit: int = 5) -> dict:
     """관계 카운트 집계(출발 정점 기준): [{"name": ..., "count": ...}, ...] 반환."""
     cypher = relation_count_by_source(relation, limit=limit)
     rows = run_cypher(conn, cypher, return_cols="name agtype, cnt agtype")
-    return [{"name": name, "count": count} for name, count in rows]
+    results = [{"name": name, "count": count} for name, count in rows]
+    return format_kg_result(results, "count_by_source", relation=relation)
 
 
-def query_two_hop_client_projects_via_product(conn, product_orig_id: str) -> List[dict]:
+def query_two_hop_client_projects_via_product(conn, product_orig_id: str) -> dict:
     """2-hop 실행: 특정 제품을 사용하는 고객사들의 프로젝트 목록을 반환한다."""
     cypher = two_hop_client_projects_via_product(product_orig_id)
     rows = run_cypher(conn, cypher, return_cols="client_name agtype, project_name agtype")
-    return [{"client_name": c, "project_name": p} for c, p in rows]
+    results = [{"client_name": c, "project_name": p} for c, p in rows]
+    return format_kg_result(results, "two_hop", relation="USES+HAS_PROJECT")
