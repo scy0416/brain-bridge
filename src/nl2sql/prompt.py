@@ -31,7 +31,17 @@ PostgreSQL SELECT 쿼리 단 하나만 생성하세요.
 6. 날짜 비교는 'YYYY-MM-DD' 형식의 문자열을 사용하세요.
 7. 정렬/집계가 필요한 질문(예: "상위 N개", "가장 많은")에는 ORDER BY와 LIMIT을
    적절히 사용하세요.
-8. 질문이 스키마로 답할 수 없는 내용이면, 다음 한 줄만 출력하세요: NO_QUERY
+8. **질문에 답하는 데 꼭 필요한 테이블만 최소한으로 JOIN하세요.** 스키마에 관계가
+   있다고 해서 불필요한 테이블까지 조인하지 마세요.
+9. GROUP BY를 사용할 때는, SELECT 절에 그룹을 식별할 수 있는 컬럼(예: 이름)을
+   반드시 함께 포함하세요. 집계 함수만 SELECT하고 GROUP BY만 걸어서 의미가
+   불분명해지는 쿼리를 만들지 마세요.
+10. 이름이 비슷한 여러 외래키 중 어떤 것을 써야 할지 FK 관계 요약을 주의 깊게
+    확인하세요 (예: "부서 소속 직원"과 "부서장"은 서로 다른 FK를 사용합니다).
+11. SQL 안에 주석(-- 등)이나 스스로에 대한 메모("이 부분은 실수입니다" 등)를
+    남기지 마세요. 쿼리를 작성하다 실수를 발견했다면, 그 부분을 지우고
+    처음부터 완성된 올바른 쿼리 하나만 출력하세요.
+12. 질문이 스키마로 답할 수 없는 내용이면, 다음 한 줄만 출력하세요: NO_QUERY
 
 # 예시
 
@@ -46,6 +56,17 @@ LIMIT 5;
 
 질문: 현재 활성 상태인 계약 수는 몇 개야?
 SELECT COUNT(*) FROM contracts WHERE status = 'active';
+
+질문: 평균 연봉이 가장 높은 부서는 어디야?
+-- 주의: departments.head_id로 조인하면 "부서장 한 명"만 매칭되어 GROUP당 1명이 되므로
+-- AVG가 사실상 그 한 명의 연봉과 같아져 의미가 없습니다. "부서 소속 직원 전체"의 평균을
+-- 구하려면 반드시 employees.dept_id 방향으로 조인해야 합니다.
+SELECT d.name, AVG(e.salary) AS avg_salary
+FROM employees e
+JOIN departments d ON e.dept_id = d.id
+GROUP BY d.name
+ORDER BY avg_salary DESC
+LIMIT 1;
 """
 
 

@@ -91,7 +91,9 @@ SCHEMA_TEXT = """\
 - title (티켓 제목, 문자열)
 - description (상세 내용, 문자열)
 - priority (우선순위, 문자열. 정확히 다음 값들 중 하나: "critical", "high", "medium", "low")
-- status (처리 상태, 문자열. 정확히 다음 값들 중 하나: "open", "in_progress", "resolved")
+- status (처리 상태, 문자열. 정확히 다음 값들 중 하나: "open", "in_progress", "resolved", "closed".
+  "미해결"/"아직 해결 안 됨"을 의미하는 질문은 status IN ('open', 'in_progress')로 필터링할 것 —
+  status != 'resolved' 는 'closed'까지 포함시키는 실수이므로 사용하지 말 것)
 - created_at (티켓 생성일시, timestamp)
 - resolved_at (해결일시, timestamp, NULL 가능)
 """
@@ -99,8 +101,8 @@ SCHEMA_TEXT = """\
 FK_SUMMARY = """\
 ## 외래키(FK) 관계 요약
 
-- departments.head_id → employees.id (부서의 부서장)
-- employees.dept_id → departments.id (직원의 소속 부서)
+- departments.head_id → employees.id (부서의 부서장 — 딱 1명. "부서 직원 전체"를 조회할 때는 이 FK가 아니라 employees.dept_id를 써야 함!)
+- employees.dept_id → departments.id (직원의 소속 부서 — "부서 소속 직원 목록/평균" 등은 반드시 이 방향으로 조인)
 - contracts.client_id → clients.id (계약의 고객사)
 - contracts.product_id → products.id (계약의 제품)
 - contracts.manager_id → employees.id (계약 담당 직원)
