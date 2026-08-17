@@ -210,6 +210,33 @@ docker compose up -d --build
   - 애플리케이션 코드(Python 등)에서 커넥션 풀을 사용할 경우, **매 커넥션 획득 시 위 두 줄을 초기화 쿼리로 실행**하도록 구현해야 합니다 (예: `psycopg2`/`asyncpg`의 커넥션 생성 콜백에 포함).
   - `create_graph()`를 이미 실행한 그래프에 다시 실행하면 `graph "..." already exists` 오류가 납니다 — 정상적인 안내이며, 필요 시 `SELECT drop_graph('<그래프명>', true);`로 초기화 후 재실행하세요.
 
+## MCP 서버 테스트 (MCP Inspector)
+
+MCP 서버(`src/api/mcp_server.py`)에 등록된 3개 도구(`nl2sql_tool`, `vector_search_tool`, `knowledge_graph_tool`)가 정상 동작하는지는 공식 [MCP Inspector](https://github.com/modelcontextprotocol/inspector)로 검증할 수 있습니다. Inspector는 정식 MCP 클라이언트로, `tools/list`(도구 목록 조회)와 `tools/call`(도구 실행) 요청을 UI에서 직접 보내볼 수 있습니다.
+
+### 실행 방법
+
+```bash
+npx @modelcontextprotocol/inspector docker compose run --rm -T app python src/api/mcp_server.py
+```
+
+- `-T` 플래그(TTY 비할당)가 필요합니다 — 없으면 터미널 제어 문자가 stdio 기반 MCP 통신에 섞여 연결이 깨질 수 있습니다.
+- 먼저 `docker compose up -d`로 전체 스택(특히 `postgres`, `ollama-init`)을 띄워둔 상태에서 실행하는 것을 권장합니다 — `app`이 의존 서비스 상태를 확인하며 출력하는 시작 배너가 최소화되어 연결이 더 안정적입니다.
+- 브라우저에서 Inspector가 열리면, **Command**는 `docker`, **Arguments**는 `compose run --rm -T app python src/api/mcp_server.py`로 설정하고 **Connect**를 누릅니다.
+
+### 검증 절차
+
+1. **Tools** 탭에서 **List Tools**를 눌러 3개 도구가 모두 나열되는지, 각 도구의 설명(description)과 파라미터(`question` 등)가 의도한 대로 표시되는지 확인합니다.
+2. 각 도구를 선택해 `question` 필드에 아래와 같은 테스트 질문을 입력하고 **Run Tool**로 실제 호출(`tools/call`)까지 검증합니다.
+
+| 도구 | 테스트 질문 예시 |
+|---|---|
+| `nl2sql_tool` | "서울 지역 매출 상위 5개 고객사를 알려줘" / "현재 활성 상태인 계약 수는 몇 개야?" / "평균 연봉이 가장 높은 부서는 어디야?" |
+| `vector_search_tool` | "Product-C1 설치 방법이 궁금해" / "백업 정책은 어떻게 되어 있어?" / "API 인증 방식은 뭐야?" |
+| `knowledge_graph_tool` | "Client-A가 사용 중인 제품 목록은?" / "경영지원팀 팀장은 누구야?" / "기술 지원 이슈가 가장 많은 제품은?" |
+
+각 응답의 `success` 필드가 `true`이고 `results`에 기대한 값이 담겨 있으면 정상입니다. 실패 시 `note` 필드에 담긴 안내 문구(빈 결과, 엔티티 미발견 등)로 원인을 확인할 수 있습니다.
+
 ## 프로젝트 구조
 
 ```
