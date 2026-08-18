@@ -24,6 +24,11 @@ from tools.knowledge_graph_tool import knowledge_graph_tool as _knowledge_graph_
 from tools.nl2sql_tool import nl2sql_tool as _nl2sql_tool
 from tools.vector_search_tool import vector_search_tool as _vector_search_tool
 
+# 별도 컨테이너("mcp-server" 서비스)로 상시 구동되며, 다른 컨테이너("app")가
+# 네트워크(Streamable HTTP)로 접속한다. 같은 프로세스 안에서 부르는 게 아니다.
+MCP_HOST = os.environ.get("MCP_SERVER_HOST", "0.0.0.0")
+MCP_PORT = int(os.environ.get("MCP_SERVER_PORT", "8100"))
+
 mcp = MCPServer("brain-bridge")
 
 
@@ -64,5 +69,6 @@ def knowledge_graph_tool(question: str) -> dict:
 
 
 if __name__ == "__main__":
-    # MCP Inspector 등으로 단독 실행해서 tools/list, tools/call을 검증할 때 사용
-    mcp.run(transport="stdio")
+    # 별도 "mcp-server" 컨테이너로 상시 구동되며, 네트워크(HTTP)로 접속받는다.
+    print(f"MCP 서버 시작: http://{MCP_HOST}:{MCP_PORT}/mcp (Streamable HTTP)")
+    mcp.run(transport="streamable-http", host=MCP_HOST, port=MCP_PORT)
