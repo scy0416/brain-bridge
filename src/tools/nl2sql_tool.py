@@ -8,14 +8,21 @@ src/tools/nl2sql_tool.py
 
 from nl2sql.execute import SQLExecutionError, execute_query
 from nl2sql.format import format_query_result
-from nl2sql.generate import SQLGenerationError, generate_sql
+from nl2sql.generate import SQLGenerationError, generate_sql, regenerate_sql_after_error
 from nl2sql.parse import NO_QUERY_MARKER, SQLParseError, extract_sql
 from nl2sql.safety import SQLSafetyError, validate_select_only
+
+MAX_EXECUTION_RETRIES = 3
 
 
 def nl2sql_tool(question: str) -> dict:
     """
     자연어 질문을 SQL로 변환해서 정형 데이터베이스(8개 테이블)를 조회한다.
+
+    실행 단계에서 SQL이 실패하면(예: 존재하지 않는 함수 사용 등), 실제 DB
+    에러 메시지를 모델에게 피드백으로 주고 최대 MAX_EXECUTION_RETRIES회
+    재생성을 시도한다 — 이는 여러 도구를 오가는 ReAct가 아니라, 이 도구
+    하나 안에서만 이뤄지는 좁은 범위의 자기 수정 루프다.
 
     :param question: 사용자의 자연어 질문
     :return: {
@@ -68,12 +75,39 @@ def nl2sql_tool(question: str) -> dict:
             sql=sql,
         )
 
-    # 4. 실행
-    try:
-        columns, rows = execute_query(validated_sql)
-    except SQLExecutionError as e:
+    # 4. 실행 (실패 시 에러 피드백 기반 재시도)
+    columns, rows, last_error = None, None, None
+    for attempt in range(MAX_EXECUTION_RETRIES + 1):
+        try:
+            columns, rows = execute_query(validated_sql)
+            last_error = None
+            break
+        except SQLExecutionError as e:
+            last_error = str(e)
+            if attempt < MAX_EXECUTION_RETRIES:
+                try:
+                    raw_retry = regenerate_sql_after_error(question, validated_sql, last_error)
+                    retry_sql = extract_sql(raw_retry)
+                    if retry_sql == NO_QUERY_MARKER:
+                        return {
+                            "question": question,
+                            "success": True,
+                            "sql": None,
+                            "columns": [],
+                            "rows": [],
+                            "row_count": 0,
+                            "is_empty": True,
+                            "note": "이 질문은 현재 데이터베이스 스키마로는 답변할 수 없는 내용입니다.",
+                        }
+                    validated_sql = validate_select_only(retry_sql)
+                except (SQLGenerationError, SQLParseError, SQLSafetyError) as retry_error:
+                    # 재시도 자체가 실패하면, 원래 에러로 최종 실패 처리
+                    last_error = f"{last_error} / 재시도 중 추가 오류: {retry_error}"
+                    break
+
+    if last_error is not None:
         return _error_result(
-            question, "쿼리 실행 중 오류가 발생했습니다.", str(e), sql=validated_sql
+            question, "쿼리 실행 중 오류가 발생했습니다.", last_error, sql=validated_sql
         )
 
     # 5. 결과 포맷
