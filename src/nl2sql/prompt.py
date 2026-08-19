@@ -28,7 +28,11 @@ PostgreSQL SELECT 쿼리 단 하나만 생성하세요.
    지어내지 마세요.
 5. 문자열 값(카테고리, 우선순위, 상태 등)은 스키마에 명시된 실제 값만 사용하세요.
    추측으로 새로운 값을 만들지 마세요.
-6. 날짜 비교는 'YYYY-MM-DD' 형식의 문자열을 사용하세요.
+6. 날짜 비교는 'YYYY-MM-DD' 형식의 문자열을 사용하세요. 특정 "연도"만 필터링할
+   때는 STRFTIME 같은 SQLite 함수를 사용하지 마세요 (PostgreSQL에 존재하지
+   않아 오류가 납니다). 대신 다음 중 하나를 사용하세요:
+   - 범위 비교: WHERE 날짜컬럼 >= 'YYYY-01-01' AND 날짜컬럼 < 'YYYY+1-01-01'
+   - 또는 PostgreSQL 표준 함수: WHERE EXTRACT(YEAR FROM 날짜컬럼) = YYYY
 7. 정렬/집계가 필요한 질문(예: "상위 N개", "가장 많은")에는 ORDER BY와 LIMIT을
    적절히 사용하세요.
 8. **질문에 답하는 데 꼭 필요한 테이블만 최소한으로 JOIN하세요.** 스키마에 관계가
@@ -41,7 +45,10 @@ PostgreSQL SELECT 쿼리 단 하나만 생성하세요.
 11. SQL 안에 주석(-- 등)이나 스스로에 대한 메모("이 부분은 실수입니다" 등)를
     남기지 마세요. 쿼리를 작성하다 실수를 발견했다면, 그 부분을 지우고
     처음부터 완성된 올바른 쿼리 하나만 출력하세요.
-12. 질문이 스키마로 답할 수 없는 내용이면, 다음 한 줄만 출력하세요: NO_QUERY
+12. **PostgreSQL 문법만 사용하세요.** STRFTIME, DATE_FORMAT, IFNULL, GETDATE()
+    같은 SQLite/MySQL/SQL Server 등 다른 DBMS의 함수를 절대 사용하지 마세요.
+    존재하지 않는 함수를 쓰면 쿼리가 실행 실패합니다.
+13. 질문이 스키마로 답할 수 없는 내용이면, 다음 한 줄만 출력하세요: NO_QUERY
 
 # 예시
 
@@ -67,6 +74,12 @@ JOIN departments d ON e.dept_id = d.id
 GROUP BY d.name
 ORDER BY avg_salary DESC
 LIMIT 1;
+
+질문: 2030년에 등록된 고객사는 몇 개야?
+-- 주의: STRFTIME은 SQLite 함수라 PostgreSQL에는 없습니다. 연도 필터는 범위
+-- 비교나 EXTRACT(YEAR FROM ...)로 작성해야 합니다.
+SELECT COUNT(id) FROM clients
+WHERE registered_at >= '2030-01-01' AND registered_at < '2031-01-01';
 """
 
 
