@@ -9,7 +9,13 @@ MCP 서버에서 실시간으로 가져온 도구 스키마와 함께 Ollama에 
 "반드시 도구를 호출하라"는 프롬프트 지시를 어긴 것) 최대 2회 재시도하고,
 그래도 실패하면 규칙 기반 힌트 분류기의 1위 제안으로 폴백한다
 (파이프라인이 조용히 끊기지 않도록 하는 안전장치).
+
+진행상황 스트리밍: dispatch_custom_event("progress", ...)로 도구 확인
+시작/완료 시점에 짧은 상태 메시지를 발행한다. 구독자가 없으면 아무
+효과가 없으므로 graph.ainvoke() 기반 기존 호출 경로에는 영향이 없다.
 """
+
+from langchain_core.callbacks.manager import dispatch_custom_event
 
 from agent.state import GraphState
 from router.hint_classifier import classify
@@ -35,6 +41,9 @@ async def router_agent_node(state: GraphState) -> dict:
     :return: state에 병합될 부분 딕셔너리 {"router_tools": [...]}
     """
     question = state["question"]
+
+    dispatch_custom_event("progress", {"message": "🔧 필요한 도구를 확인하는 중입니다..."})
+
     tools = await fetch_tools_from_mcp()
 
     system_prompt = build_system_prompt(question)
@@ -65,5 +74,8 @@ async def router_agent_node(state: GraphState) -> dict:
         if hint["suggested_tools"]:
             fallback_tool = hint["suggested_tools"][0]
             router_tools = [{"name": fallback_tool, "args": {"question": question}}]
+
+    tool_names = ", ".join(t["name"] for t in router_tools) if router_tools else "없음"
+    dispatch_custom_event("progress", {"message": f"✅ 선택된 도구: {tool_names}"})
 
     return {"router_tools": router_tools}

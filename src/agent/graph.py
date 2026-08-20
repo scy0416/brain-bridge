@@ -116,14 +116,22 @@ async def run_agent(messages: list[dict]) -> str:
 async def run_agent_stream(messages: list[dict]):
     """run_agent와 동일한 캡슐화 원칙을 따르는 스트리밍 버전.
 
-    answer_agent_node가 dispatch_custom_event("token", {"content": ...})로
-    토큰마다 발행하는 커스텀 이벤트를, graph.astream_events()로 구독해서
-    그대로 토큰 문자열만 순차적으로 yield한다. 호출자(FastAPI 어댑터)는
-    그래프 내부 구조나 이벤트 형식을 몰라도 되고, 받은 토큰을 SSE 청크로
-    포맷팅하는 것만 신경 쓰면 된다.
+    각 노드가 dispatch_custom_event로 발행하는 두 종류의 커스텀 이벤트를
+    graph.astream_events()로 구독해서, 종류를 구분한 딕셔너리로 순차
+    yield한다:
+      - {"type": "progress", "message": "..."}: 노드 상태/분기 진행상황
+        (base_agent, router_agent 등이 발행 — 새 노드가 progress 이벤트를
+        추가로 발행해도 이 함수는 코드 변경 없이 자동으로 전달한다)
+      - {"type": "token", "content": "..."}: answer_agent가 생성하는
+        답변 토큰 조각
+
+    호출자(FastAPI 어댑터)는 그래프 내부 구조나 dispatch_custom_event의
+    이벤트 이름 같은 세부사항을 몰라도 되고, "type"만 보고 progress는
+    상태 표시로, token은 실제 답변 본문으로 렌더링하면 된다.
 
     :param messages: run_agent와 동일 (OpenAI 포맷 대화 히스토리)
-    :yield: 토큰 조각 문자열
+    :yield: {"type": "progress", "message": str} 또는
+            {"type": "token", "content": str}
     """
     question = _extract_last_user_question(messages)
 
@@ -133,7 +141,17 @@ async def run_agent_stream(messages: list[dict]):
     }
 
     async for event in graph.astream_events(initial_state, version="v2"):
-        if event["event"] == "on_custom_event" and event.get("name") == "token":
-            content = event["data"].get("content")
+        if event["event"] != "on_custom_event":
+            continue
+
+        name = event.get("name")
+        data = event.get("data") or {}
+
+        if name == "token":
+            content = data.get("content")
             if content:
-                yield content
+                yield {"type": "token", "content": content}
+        elif name == "progress":
+            message = data.get("message")
+            if message:
+                yield {"type": "progress", "message": message}

@@ -13,12 +13,16 @@ call_chat()을 재사용한다 (call_chat은 동기 함수이며, 도구 스키�
 호출 시 assistant 메시지 딕셔너리 {"content": "...", ...}를 그대로
 반환한다 — router_node.py의 사용 방식과 동일).
 
-진행상황 스트리밍(dispatch_custom_event)은 이번 단계에서는 추가하지
-않는다 — Phase 13에서 한꺼번에 도입하기로 결정.
+진행상황 스트리밍: 노드 시작/종료 시점에 dispatch_custom_event("progress", ...)
+로 짧은 상태 메시지를 발행한다. 구독자(graph.astream_events)가 없으면
+아무 효과가 없으므로 graph.ainvoke() 기반의 기존 호출 경로(run_agent,
+테스트 스크립트들)에는 영향이 없다.
 """
 
 import json
 import logging
+
+from langchain_core.callbacks.manager import dispatch_custom_event
 
 from agent.base_prompt import build_base_messages
 from agent.state import GraphState
@@ -88,6 +92,8 @@ def base_agent_node(state: GraphState) -> dict:
     되므로 function-calling이 아닌 일반 텍스트(JSON) 응답으로 처리한다.
     """
     question = state["question"]
+
+    dispatch_custom_event("progress", {"message": "🧭 질문 유형을 확인하는 중입니다..."})
 
     messages = build_base_messages(question)
     message = call_chat(messages, think=False)
