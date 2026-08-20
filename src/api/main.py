@@ -60,8 +60,39 @@ def _format_sse(chunk: ChatCompletionChunk) -> str:
 
 
 async def _stream_chat_completions(messages: list[dict], model: str):
-    """run_agent_stream의 토큰을 OpenAI 호환 SSE 청크로 변환해 순차 전달."""
+    """run_agent_stream의 이벤트를 OpenAI 호환 SSE 청크로 변환해 순차 전달.
+
+    progress 이벤트는 delta.reasoning_content로, token 이벤트는 delta.content
+    로 각각 보낸다. Open WebUI는 reasoning_content 델타를 네이티브로 인식해서
+    별도의 접이식 "생각 중" UI로 렌더링하고, content와 명확히 분리해서
+    보여준다 (DeepSeek R1 등 reasoning 모델과 동일한 메커니즘).
+
+    이전에 시도했던 raw HTML(<details><summary>)이나 마크다운 인용구
+    우회 방식보다 이 방식이 더 낫다 - Open WebUI가 정식으로 파싱하는
+    필드라서 렌더러의 HTML escape 여부와 무관하게 항상 의도대로 접이식
+    UI로 그려진다.
+    """
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+
+    def _reasoning_chunk(text: str) -> ChatCompletionChunk:
+        return ChatCompletionChunk(
+            id=completion_id,
+            model=model,
+            choices=[
+                ChatCompletionChunkChoice(
+                    delta=ChatCompletionChunkDelta(reasoning_content=text)
+                )
+            ],
+        )
+
+    def _content_chunk(text: str) -> ChatCompletionChunk:
+        return ChatCompletionChunk(
+            id=completion_id,
+            model=model,
+            choices=[
+                ChatCompletionChunkChoice(delta=ChatCompletionChunkDelta(content=text))
+            ],
+        )
 
     # 첫 청크: role만 포함 (OpenAI 스펙 관례 - Open WebUI도 이 형태를 기대)
     first_chunk = ChatCompletionChunk(
@@ -73,15 +104,12 @@ async def _stream_chat_completions(messages: list[dict], model: str):
     )
     yield _format_sse(first_chunk)
 
-    async for token in run_agent_stream(messages):
-        chunk = ChatCompletionChunk(
-            id=completion_id,
-            model=model,
-            choices=[
-                ChatCompletionChunkChoice(delta=ChatCompletionChunkDelta(content=token))
-            ],
-        )
-        yield _format_sse(chunk)
+    async for event in run_agent_stream(messages):
+        if event["type"] == "progress":
+            yield _format_sse(_reasoning_chunk(f"{event['message']}\n"))
+
+        elif event["type"] == "token":
+            yield _format_sse(_content_chunk(event["content"]))
 
     # 종료 청크: 빈 delta + finish_reason="stop"
     final_chunk = ChatCompletionChunk(
