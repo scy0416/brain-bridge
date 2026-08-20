@@ -67,3 +67,47 @@ def build_graph():
 
 # 그래프 인스턴스 (FastAPI 어댑터 등에서 import해서 사용)
 graph = build_graph()
+
+
+def _extract_last_user_question(messages: list[dict]) -> str:
+    """messages(OpenAI 포맷)에서 가장 최근 user 발화의 content를 추출한다.
+
+    Base/Router Agent가 사용할 state["question"]을 채우기 위한 용도.
+    문맥 의존적 후속 질문은 처리하지 않기로 한 설계 결정에 따라, 이전
+    턴은 참고하지 않고 항상 마지막 user 메시지 하나만 사용한다.
+    """
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return message.get("content") or ""
+    return ""
+
+
+async def run_agent(messages: list[dict]) -> str:
+    """Open WebUI(또는 다른 어떤 호출자든) 대화 히스토리를 받아 그래프를
+    실행하고 최종 답변 문자열만 돌려주는 공통 진입점.
+
+    FastAPI 어댑터의 /v1/chat/completions가 이 함수 하나만 호출하면
+    되도록, "OpenAI 포맷 messages 리스트를 받아서 답변 문자열을 반환"
+    하는 얇은 캡슐화 레이어로 둔다. 그래프 내부 구조(state 스키마,
+    노드 구성)는 호출자가 알 필요 없게 여기서 전부 감춘다.
+
+    :param messages: OpenAI 포맷 대화 히스토리
+                      [{"role": "user"|"assistant"|"system", "content": "..."}, ...]
+    :return: 최종 답변 문자열. 그래프가 답을 만들지 못한 경우
+             (예: final_answer가 비어있는 예외적 상황)에도 빈 문자열
+             대신 사용자에게 보여줄 수 있는 안내 문구를 반환한다.
+    """
+    question = _extract_last_user_question(messages)
+
+    initial_state: GraphState = {
+        "messages": messages,
+        "question": question,
+    }
+
+    result_state = await graph.ainvoke(initial_state)
+
+    final_answer = result_state.get("final_answer")
+    if not final_answer:
+        return "죄송합니다, 답변을 생성하지 못했습니다. 다시 시도해 주세요."
+
+    return final_answer
