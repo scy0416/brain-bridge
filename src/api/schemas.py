@@ -56,10 +56,17 @@ class ChatCompletionResponse(BaseModel):
 # ---------- /v1/chat/completions 스트리밍 응답 (SSE 청크) ----------
 
 class ChatCompletionChunkDelta(BaseModel):
-    # 첫 청크는 role만, 이후 청크는 content만, 마지막 청크는 둘 다 비움
-    # (OpenAI 스펙 관례 - Open WebUI도 이 형태를 그대로 기대함)
+    # 첫 청크는 role만, 이후 청크는 content 또는 reasoning_content만,
+    # 마지막 청크는 전부 비움 (OpenAI 스펙 관례 - Open WebUI도 이 형태를
+    # 그대로 기대함).
     role: Optional[Literal["assistant"]] = None
     content: Optional[str] = None
+    # Open WebUI가 네이티브로 인식하는 "생각 과정" 델타 필드 (DeepSeek R1,
+    # OpenAI o-시리즈 등에서 쓰이는 것과 동일한 필드명). 이 필드로 온
+    # 텍스트는 Open WebUI가 별도의 접이식 "Thinking" UI로 렌더링하고,
+    # content와는 분리해서 보여준다. 우리는 이 필드로 노드별 진행상황을
+    # 흘려보낸다.
+    reasoning_content: Optional[str] = None
 
 
 class ChatCompletionChunkChoice(BaseModel):
