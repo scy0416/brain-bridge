@@ -4,8 +4,8 @@ src/agent/answer_prompt.py
 Answer Agent의 시스템 프롬프트와, tool_node가 수집한 MCP 도구 실행 결과를
 프롬프트에 넣을 텍스트로 정리하는 함수.
 
-역할: 원본 질문 + tool_results(있으면 RAG 방식, 없으면 대화형)를 받아서
-      최종 자연어 답변을 만들도록 모델을 유도한다. 이 노드는 도구를
+역할: 대화 히스토리 전체 + tool_results(있으면 RAG 방식, 없으면 대화형)를
+      받아서 최종 자연어 답변을 만들도록 모델을 유도한다. 이 노드는 도구를
       호출하지 않고, 오직 자연어 생성만 담당한다.
 """
 
@@ -15,7 +15,8 @@ ANSWER_SYSTEM_PROMPT = """\
 당신은 사용자 질문에 최종적으로 답변하는 "답변 생성 전담" 에이전트입니다.
 
 ## 역할 (반드시 지킬 것)
-1. 아래 "조회 결과"만을 근거로 사용자 질문에 자연스러운 한국어로 답하세요.
+1. 아래 "조회 결과"만을 근거로 사용자의 가장 최근 질문에 자연스러운
+   한국어로 답하세요.
 2. **조회 결과에 없는 내용을 추측하거나 지어내지 마세요.** 확실하지 않으면
    모른다고 솔직히 말하세요.
 3. 조회 결과에 "조건에 맞는 데이터가 없습니다" 같은 안내가 포함되어 있다면,
@@ -31,6 +32,15 @@ ANSWER_SYSTEM_PROMPT = """\
 7. SQL, Cypher, JSON, 컬럼명 같은 기술적인 표현을 그대로 노출하지 말고,
    사람이 이해하기 쉬운 문장으로 자연스럽게 정리하세요.
 8. 답변만 출력하세요. "네, 답변드리겠습니다" 같은 군더더기 없이 바로 본론으로 시작하세요.
+
+## 이전 대화 활용 (멀티턴)
+9. 이전 대화 턴이 함께 주어질 수 있습니다. 이는 어조/맥락을 자연스럽게
+   이어가기 위한 참고용입니다 — 이전 턴에서 이미 답변한 사실은 그대로
+   신뢰해도 되지만, **이번 턴의 새로운 사실 관계는 반드시 이번 턴의
+   "조회 결과"만 근거로 삼으세요.** 이전 턴의 조회 결과를 이번 질문에
+   재사용하거나 섞어서 답하지 마세요.
+10. 이전 대화에서 이미 다룬 내용을 사용자가 다시 묻는 게 아니라면,
+    이전 턴을 반복해서 요약하지 말고 이번 질문에 집중해서 답하세요.
 """
 
 
@@ -75,11 +85,41 @@ def format_tool_results(tool_results: list) -> str:
     return "\n\n".join(blocks)
 
 
-def build_answer_messages(question: str, tool_results: list) -> list:
-    """Answer Agent에게 보낼 messages(system + user)를 구성한다."""
+def build_answer_messages(messages: list, tool_results: list) -> list:
+    """Answer Agent에게 보낼 messages(system + 이전 대화 + 보강된 최신 질문)를 구성한다.
+
+    :param messages: 대화 히스토리 전체 (OpenAI 포맷,
+                      [{"role": "user"|"assistant"|"system", "content": "..."}, ...]).
+                      마지막 항목이 이번 턴의 user 질문이어야 한다.
+    :param tool_results: 이번 턴에 한해 수집된 도구 실행 결과.
+                          이전 턴의 결과는 포함되지 않는다 (설계상 매 턴
+                          독립적으로 수집됨).
+    :return: Ollama에 보낼 messages 리스트
+    """
     context = format_tool_results(tool_results)
-    user_content = f"사용자 질문: {question}\n\n조회 결과:\n{context}"
-    return [
-        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
-    ]
+
+    # 들어온 히스토리 중 role="system"은 우리가 통제하지 않는 값(예: Open
+    # WebUI가 자체적으로 끼워 보내는 시스템 메시지)일 수 있으므로 제외하고,
+    # 우리가 관리하는 ANSWER_SYSTEM_PROMPT 하나로 시스템 메시지를 고정한다.
+    history = [m for m in messages if m.get("role") != "system"]
+
+    if not history:
+        # 방어적 처리: 히스토리가 비어있는 경우는 정상 흐름에서는 발생하지
+        # 않지만(run_agent가 항상 최소 1개의 user 메시지를 채워 넣음),
+        # 만일을 대비해 빈 질문으로라도 진행한다.
+        history = [{"role": "user", "content": ""}]
+
+    # 마지막 메시지(이번 턴의 질문)만 "조회 결과"를 포함하도록 보강하고,
+    # 그 이전 턴들은 원문 그대로 이어붙인다.
+    prior_turns = history[:-1]
+    last_turn = history[-1]
+
+    enriched_last_content = (
+        f"사용자 질문: {last_turn.get('content', '')}\n\n조회 결과:\n{context}"
+    )
+
+    result = [{"role": "system", "content": ANSWER_SYSTEM_PROMPT}]
+    result.extend({"role": m.get("role"), "content": m.get("content")} for m in prior_turns)
+    result.append({"role": "user", "content": enriched_last_content})
+
+    return result
