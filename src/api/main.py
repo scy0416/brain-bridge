@@ -3,18 +3,17 @@ api/main.py
 
 Open WebUI가 호출하는 OpenAI 호환 API를 흉내 내는 FastAPI 앱.
 
-이번 단계(골격 생성)에서는 다음만 구현한다:
   - GET  /health              : 헬스체크
   - GET  /v1/models           : Open WebUI의 모델 선택 목록에 노출
-  - POST /v1/chat/completions : 스텁 응답 (아직 agent.graph와 연결 안 함)
+  - POST /v1/chat/completions : agent.graph.run_agent로 실제 그래프 실행
 
-/v1/chat/completions을 실제 LangGraph 실행(agent.graph.graph.ainvoke)에
-연결하는 작업과 스트리밍(SSE) 지원은 다음 단계에서 진행한다. 지금은
-Open WebUI <-> FastAPI 간 연결 자체(핸드셰이크, 모델 목록 노출, 요청/
-응답 스키마)가 정상 동작하는지 독립적으로 검증하기 위한 스텁이다.
+/v1/chat/completions은 agent.graph.run_agent(messages) -> str 하나만
+호출한다. 그래프 내부 구조(state 스키마, 노드 분기 등)는 run_agent가
+전부 캡슐화하므로 이 파일은 신경 쓰지 않는다.
 
-주의: 이 스텁은 요청에 포함된 마지막 user 메시지를 그대로 되돌려주는
-방식으로, 실제 에이전트 로직은 전혀 타지 않는다.
+주의: 아직 스트리밍(SSE)은 지원하지 않는다 — Open WebUI가 stream=True로
+요청해도 지금은 완성된 답변을 한 번에 반환한다. 스트리밍 지원은 이후
+단계에서 추가한다.
 """
 
 import os
@@ -22,6 +21,7 @@ import uuid
 
 from fastapi import FastAPI
 
+from agent.graph import run_agent
 from api.schemas import (
     ChatCompletionChoice,
     ChatCompletionRequest,
@@ -50,24 +50,20 @@ def list_models() -> ModelsResponse:
 
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResponse:
-    # 마지막 user 메시지 추출 (아직 그래프에 연결하지 않은 스텁 단계)
-    last_user_message = next(
-        (m.content for m in reversed(request.messages) if m.role == "user"),
-        "",
-    )
+async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResponse:
+    # Pydantic ChatMessage 리스트 -> run_agent가 기대하는 순수 dict 리스트
+    # (OpenAI 포맷) 로 변환. run_agent는 agent.graph 내부 구조를 전혀
+    # 모르는 순수 인터페이스이므로 여기서 변환 책임을 진다.
+    messages = [m.model_dump() for m in request.messages]
 
-    stub_content = (
-        "[스텁 응답 - 아직 에이전트에 연결되지 않았습니다]\n"
-        f"수신한 질문: {last_user_message}"
-    )
+    answer = await run_agent(messages)
 
     return ChatCompletionResponse(
         id=f"chatcmpl-{uuid.uuid4().hex}",
         model=request.model,
         choices=[
             ChatCompletionChoice(
-                message=ChatCompletionResponseMessage(content=stub_content)
+                message=ChatCompletionResponseMessage(content=answer)
             )
         ],
     )
