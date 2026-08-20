@@ -53,6 +53,29 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionChoice]
 
 
+# ---------- /v1/chat/completions 스트리밍 응답 (SSE 청크) ----------
+
+class ChatCompletionChunkDelta(BaseModel):
+    # 첫 청크는 role만, 이후 청크는 content만, 마지막 청크는 둘 다 비움
+    # (OpenAI 스펙 관례 - Open WebUI도 이 형태를 그대로 기대함)
+    role: Optional[Literal["assistant"]] = None
+    content: Optional[str] = None
+
+
+class ChatCompletionChunkChoice(BaseModel):
+    index: int = 0
+    delta: ChatCompletionChunkDelta
+    finish_reason: Optional[str] = None
+
+
+class ChatCompletionChunk(BaseModel):
+    id: str
+    object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionChunkChoice]
+
+
 # ---------- /v1/models 응답 ----------
 
 class ModelInfo(BaseModel):
