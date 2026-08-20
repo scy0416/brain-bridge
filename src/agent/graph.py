@@ -10,13 +10,13 @@ Brain Bridge 에이전트 그래프 배선.
            - needs_tools=True  -> router_agent -> tool_exec -> answer_agent -> END
            - needs_tools=False -> answer_agent -> END (Tool 실행 없이 바로 진입)
 
-주의: base_agent_node/answer_agent_node는 동기 함수, router_agent_node/
-tool_execution_node는 비동기 함수로 구현돼 있다 (각 노드 파일 참고).
+주의: base_agent_node는 동기 함수, router_agent_node/tool_execution_node/
+answer_agent_node는 비동기 함수로 구현돼 있다 (각 노드 파일 참고).
 LangGraph는 동기/비동기 노드가 섞인 그래프를 문제없이 실행하지만, 그래프
 전체를 실행할 때는 반드시 graph.ainvoke() / graph.astream_events() 등
-비동기 실행 경로를 사용해야 한다 — router_agent/tool_exec이 내부적으로
-MCP 서버에 네트워크 호출(await)을 하기 때문에, graph.invoke()(동기
-실행)로 부르면 이 두 노드에서 오류가 난다.
+비동기 실행 경로를 사용해야 한다 — router_agent/tool_exec/answer_agent가
+내부적으로 네트워크 호출(await)을 하기 때문에, graph.invoke()(동기
+실행)로 부르면 이 노드들에서 오류가 난다.
 """
 
 from langgraph.graph import END, START, StateGraph
@@ -111,3 +111,29 @@ async def run_agent(messages: list[dict]) -> str:
         return "죄송합니다, 답변을 생성하지 못했습니다. 다시 시도해 주세요."
 
     return final_answer
+
+
+async def run_agent_stream(messages: list[dict]):
+    """run_agent와 동일한 캡슐화 원칙을 따르는 스트리밍 버전.
+
+    answer_agent_node가 dispatch_custom_event("token", {"content": ...})로
+    토큰마다 발행하는 커스텀 이벤트를, graph.astream_events()로 구독해서
+    그대로 토큰 문자열만 순차적으로 yield한다. 호출자(FastAPI 어댑터)는
+    그래프 내부 구조나 이벤트 형식을 몰라도 되고, 받은 토큰을 SSE 청크로
+    포맷팅하는 것만 신경 쓰면 된다.
+
+    :param messages: run_agent와 동일 (OpenAI 포맷 대화 히스토리)
+    :yield: 토큰 조각 문자열
+    """
+    question = _extract_last_user_question(messages)
+
+    initial_state: GraphState = {
+        "messages": messages,
+        "question": question,
+    }
+
+    async for event in graph.astream_events(initial_state, version="v2"):
+        if event["event"] == "on_custom_event" and event.get("name") == "token":
+            content = event["data"].get("content")
+            if content:
+                yield content
