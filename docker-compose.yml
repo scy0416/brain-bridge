@@ -72,6 +72,7 @@ services:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./data:/app/data
+      - ./logs:/app/logs
     ports:
       - "${API_PORT:-8000}:8000"
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/app/src"]
@@ -136,6 +137,7 @@ services:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./data:/app/data
+      - ./logs:/app/logs
     ports:
       - "8100:8100"
     command: ["python", "src/api/mcp_server.py"]
