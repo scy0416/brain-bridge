@@ -33,39 +33,53 @@ mcp = MCPServer("brain-bridge")
 
 
 @mcp.tool()
-def nl2sql_tool(question: str) -> dict:
+def nl2sql_tool(question: str, request_id: str = "unknown") -> dict:
     """
     회사의 정형(테이블) 데이터베이스에 대한 질문에 답한다.
     매출, 계약, 고객사 정보, 직원/부서 정보, 제품 목록, 기술 지원 티켓처럼
     "숫자로 집계하거나(합계/평균/개수/순위), 조건으로 필터링해야 하는" 질문에 사용한다.
     예: "서울 지역 매출 상위 5개 고객사", "현재 활성 계약 수", "평균 연봉이 가장 높은 부서".
     자연어 질문을 SQL로 변환해서 실행하고 결과를 반환한다.
+
+    :param request_id: agent/tool_node.py가 args에 섞어 보내는 요청 식별자.
+                        현재 _nl2sql_tool은 이 값을 로깅에 쓰지 않지만,
+                        MCP 스키마에서 미리 받아두어 향후 nl2sql_tool 내부에
+                        같은 방식의 log_stage 계측을 추가할 때 바로 연결되게 한다.
     """
     return _nl2sql_tool(question)
 
 
 @mcp.tool()
-def vector_search_tool(question: str, k: int = 3) -> dict:
+def vector_search_tool(question: str, k: int = 3, request_id: str = "unknown") -> dict:
     """
     회사의 비정형 문서(장애보고서/기술문서/회의록/제안서)에서 질문과 의미적으로
     관련된 내용을 검색한다. "방법", "정책", "이슈가 있었나", "논의된 내용" 처럼
     문서 안의 서술형 정보를 찾아야 하는 질문에 사용한다.
     예: "Product-C1 설치 방법", "백업 정책", "SSL 인증서 관련 장애가 있었나".
     :param k: 반환할 관련 문서 조각 개수 (기본 3)
+    :param request_id: nl2sql_tool과 동일 — 현재는 미사용, 향후 계측 확장용
     """
     return _vector_search_tool(question, k=k)
 
 
 @mcp.tool()
-def knowledge_graph_tool(question: str) -> dict:
+def knowledge_graph_tool(question: str, request_id: str = "unknown") -> dict:
     """
     회사 조직/고객/제품 간의 "관계"를 묻는 질문에 답한다. 고객사-제품 사용 관계,
     직원-부서 소속, 직원-고객사 담당, 직원-프로젝트 리드, 부서장, 기술 지원 이슈
     제기 관계처럼 "누가 무엇을 사용/담당/소속/이끄는지"를 묻는 질문에 사용한다.
     예: "Client-A가 사용 중인 제품", "클라우드사업부 소속 직원", "경영지원팀 팀장",
     "이슈가 가장 많은 제품", "가장 많은 고객을 담당하는 직원".
+
+    :param request_id: 호출자(agent/tool_node.py)가 args에 섞어 보내는 요청
+                        식별자. Router Agent가 스스로 도구를 고를 때는 이
+                        인자를 채우지 않으므로 기본값 "unknown"을 둔다.
+                        내부 로깅(kg_entity_extraction/kg_query_execution)을
+                        tool_node.py의 mcp_tool_call 로그와 같은 request_id로
+                        조인하기 위한 용도일 뿐, 실제 그래프 조회 로직에는
+                        관여하지 않는다.
     """
-    return _knowledge_graph_tool(question)
+    return _knowledge_graph_tool(question, request_id=request_id)
 
 
 if __name__ == "__main__":
