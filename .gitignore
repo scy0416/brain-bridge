@@ -20,3 +20,6 @@ Thumbs.db
 
 # LangGraph / 모델 캐시 (혹시 로컬에 다운로드되는 경우 대비)
 *.gguf
+
+# 로그 파일
+logs/
