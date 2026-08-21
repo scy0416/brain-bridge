@@ -26,6 +26,7 @@ from agent.base_node import base_agent_node
 from agent.router_node import router_agent_node
 from agent.state import GraphState
 from agent.tool_node import tool_execution_node
+from utils.logging_config import log_stage
 
 
 def _route_after_base(state: GraphState) -> str:
@@ -82,7 +83,7 @@ def _extract_last_user_question(messages: list[dict]) -> str:
     return ""
 
 
-async def run_agent(messages: list[dict]) -> str:
+async def run_agent(messages: list[dict], request_id: str) -> str:
     """Open WebUI(또는 다른 어떤 호출자든) 대화 히스토리를 받아 그래프를
     실행하고 최종 답변 문자열만 돌려주는 공통 진입점.
 
@@ -93,6 +94,10 @@ async def run_agent(messages: list[dict]) -> str:
 
     :param messages: OpenAI 포맷 대화 히스토리
                       [{"role": "user"|"assistant"|"system", "content": "..."}, ...]
+    :param request_id: FastAPI 어댑터가 요청 1건당 1회 발급한 고유 ID.
+                        초기 state에 담겨 base_agent -> router_agent ->
+                        tool_exec -> answer_agent 전체로 전파되며,
+                        각 노드의 log_stage() 호출이 이 값으로 로그를 남긴다.
     :return: 최종 답변 문자열. 그래프가 답을 만들지 못한 경우
              (예: final_answer가 비어있는 예외적 상황)에도 빈 문자열
              대신 사용자에게 보여줄 수 있는 안내 문구를 반환한다.
@@ -102,9 +107,14 @@ async def run_agent(messages: list[dict]) -> str:
     initial_state: GraphState = {
         "messages": messages,
         "question": question,
+        "request_id": request_id,
     }
 
-    result_state = await graph.ainvoke(initial_state)
+    # 그래프 전체(base_agent~answer_agent) 종단간 소요시간.
+    # 개별 노드 단계(router_agent, mcp_tool_call, kg_* 등)와 비교하면
+    # "이 시간 중 어디가 병목인지"가 analyze_logs.py 출력에서 바로 드러난다.
+    with log_stage("agent_run_total", request_id, question=question, streaming=False):
+        result_state = await graph.ainvoke(initial_state)
 
     final_answer = result_state.get("final_answer")
     if not final_answer:
@@ -113,7 +123,7 @@ async def run_agent(messages: list[dict]) -> str:
     return final_answer
 
 
-async def run_agent_stream(messages: list[dict]):
+async def run_agent_stream(messages: list[dict], request_id: str):
     """run_agent와 동일한 캡슐화 원칙을 따르는 스트리밍 버전.
 
     각 노드가 dispatch_custom_event로 발행하는 두 종류의 커스텀 이벤트를
@@ -130,6 +140,7 @@ async def run_agent_stream(messages: list[dict]):
     상태 표시로, token은 실제 답변 본문으로 렌더링하면 된다.
 
     :param messages: run_agent와 동일 (OpenAI 포맷 대화 히스토리)
+    :param request_id: run_agent와 동일 — 초기 state에 담겨 전 노드로 전파된다.
     :yield: {"type": "progress", "message": str} 또는
             {"type": "token", "content": str}
     """
@@ -138,20 +149,22 @@ async def run_agent_stream(messages: list[dict]):
     initial_state: GraphState = {
         "messages": messages,
         "question": question,
+        "request_id": request_id,
     }
 
-    async for event in graph.astream_events(initial_state, version="v2"):
-        if event["event"] != "on_custom_event":
-            continue
+    with log_stage("agent_run_total", request_id, question=question, streaming=True):
+        async for event in graph.astream_events(initial_state, version="v2"):
+            if event["event"] != "on_custom_event":
+                continue
 
-        name = event.get("name")
-        data = event.get("data") or {}
+            name = event.get("name")
+            data = event.get("data") or {}
 
-        if name == "token":
-            content = data.get("content")
-            if content:
-                yield {"type": "token", "content": content}
-        elif name == "progress":
-            message = data.get("message")
-            if message:
-                yield {"type": "progress", "message": message}
+            if name == "token":
+                content = data.get("content")
+                if content:
+                    yield {"type": "token", "content": content}
+            elif name == "progress":
+                message = data.get("message")
+                if message:
+                    yield {"type": "progress", "message": message}

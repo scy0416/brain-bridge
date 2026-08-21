@@ -23,6 +23,7 @@ from router.mcp_tools import fetch_tools_from_mcp
 from router.ollama_client import call_chat
 from router.prompt import build_system_prompt
 from router.schema import parse_router_decision
+from utils.logging_config import log_stage
 
 MAX_RETRIES = 2
 RETRY_REMINDER = (
@@ -41,41 +42,59 @@ async def router_agent_node(state: GraphState) -> dict:
     :return: state에 병합될 부분 딕셔너리 {"router_tools": [...]}
     """
     question = state["question"]
+    request_id = state["request_id"]
 
-    dispatch_custom_event("progress", {"message": "🔧 필요한 도구를 확인하는 중입니다..."})
+    with log_stage("router_agent", request_id, question=question) as log_result:
+        dispatch_custom_event("progress", {"message": "🔧 필요한 도구를 확인하는 중입니다..."})
 
-    tools = await fetch_tools_from_mcp()
+        tools = await fetch_tools_from_mcp()
 
-    system_prompt = build_system_prompt(question)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question},
-    ]
+        system_prompt = build_system_prompt(question)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question},
+        ]
 
-    decision = None
-    for attempt in range(MAX_RETRIES + 1):
-        message = call_chat(messages, tools=tools, think=False)
-        decision = parse_router_decision(message)
+        decision = None
+        retries_used = 0
+        for attempt in range(MAX_RETRIES + 1):
+            message = call_chat(
+                messages,
+                tools=tools,
+                think=False,
+                request_id=request_id,
+                stage_hint="router",
+            )
+            decision = parse_router_decision(message)
 
-        if decision.tools:
-            break
+            if decision.tools:
+                break
 
-        # 검증 실패(도구 0개): 대화 맥락에 상황을 남기고 강하게 재요청
-        if attempt < MAX_RETRIES:
-            messages.append({"role": "assistant", "content": message.get("content") or ""})
-            messages.append({"role": "user", "content": RETRY_REMINDER})
+            # 검증 실패(도구 0개): 대화 맥락에 상황을 남기고 강하게 재요청
+            if attempt < MAX_RETRIES:
+                retries_used += 1
+                messages.append({"role": "assistant", "content": message.get("content") or ""})
+                messages.append({"role": "user", "content": RETRY_REMINDER})
 
-    router_tools = [{"name": t.name, "args": t.args} for t in decision.tools] if decision.tools else []
+        router_tools = [{"name": t.name, "args": t.args} for t in decision.tools] if decision.tools else []
+        used_fallback = False
 
-    if not router_tools:
-        # 최종 폴백: 재시도까지 실패하면, 규칙 기반 힌트의 1위 제안으로 진행
-        # (파이프라인이 끊기는 것보다, 근사치라도 도구를 실행하는 게 낫다는 판단)
-        hint = classify(question)
-        if hint["suggested_tools"]:
-            fallback_tool = hint["suggested_tools"][0]
-            router_tools = [{"name": fallback_tool, "args": {"question": question}}]
+        if not router_tools:
+            # 최종 폴백: 재시도까지 실패하면, 규칙 기반 힌트의 1위 제안으로 진행
+            # (파이프라인이 끊기는 것보다, 근사치라도 도구를 실행하는 게 낫다는 판단)
+            hint = classify(question)
+            if hint["suggested_tools"]:
+                fallback_tool = hint["suggested_tools"][0]
+                router_tools = [{"name": fallback_tool, "args": {"question": question}}]
+                used_fallback = True
 
-    tool_names = ", ".join(t["name"] for t in router_tools) if router_tools else "없음"
-    dispatch_custom_event("progress", {"message": f"✅ 선택된 도구: {tool_names}"})
+        tool_names = ", ".join(t["name"] for t in router_tools) if router_tools else "없음"
+        dispatch_custom_event("progress", {"message": f"✅ 선택된 도구: {tool_names}"})
+
+        # 재시도/폴백이 얼마나 자주 발생하는지도 함께 남긴다 —
+        # Router Agent의 소형 모델 신뢰도를 추적하는 데 쓸모 있는 지표.
+        log_result["selected_tools"] = [t["name"] for t in router_tools]
+        log_result["retries_used"] = retries_used
+        log_result["used_fallback"] = used_fallback
 
     return {"router_tools": router_tools}

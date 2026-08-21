@@ -27,6 +27,7 @@ from langchain_core.callbacks.manager import dispatch_custom_event
 from agent.base_prompt import build_base_messages
 from agent.state import GraphState
 from router.ollama_client import call_chat
+from utils.logging_config import log_stage
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +93,16 @@ def base_agent_node(state: GraphState) -> dict:
     되므로 function-calling이 아닌 일반 텍스트(JSON) 응답으로 처리한다.
     """
     question = state["question"]
+    request_id = state["request_id"]
 
-    dispatch_custom_event("progress", {"message": "🧭 질문 유형을 확인하는 중입니다..."})
+    with log_stage("base_agent", request_id, question=question) as log_result:
+        dispatch_custom_event("progress", {"message": "🧭 질문 유형을 확인하는 중입니다..."})
 
-    messages = build_base_messages(question)
-    message = call_chat(messages, think=False)
+        messages = build_base_messages(question)
+        message = call_chat(messages, think=False, request_id=request_id, stage_hint="base")
 
-    raw_content = message.get("content") or ""
-    needs_tools = _parse_needs_tools(raw_content)
+        raw_content = message.get("content") or ""
+        needs_tools = _parse_needs_tools(raw_content)
+        log_result["needs_tools"] = needs_tools
 
     return {"needs_tools": needs_tools}

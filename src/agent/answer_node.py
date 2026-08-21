@@ -25,6 +25,7 @@ from langchain_core.callbacks.manager import dispatch_custom_event
 from agent.answer_prompt import build_answer_messages
 from agent.state import GraphState
 from router.ollama_client import stream_chat
+from utils.logging_config import log_stage
 
 FALLBACK_ANSWER = "죄송합니다, 답변을 생성하지 못했습니다. 다시 질문해 주세요."
 
@@ -44,19 +45,27 @@ async def answer_agent_node(state: GraphState) -> dict:
     :param state: GraphState (messages 필수, tool_results는 없어도 됨)
     :return: state에 병합될 부분 딕셔너리 {"final_answer": str}
     """
+    request_id = state["request_id"]
     messages = state.get("messages") or [{"role": "user", "content": state.get("question", "")}]
     tool_results = state.get("tool_results", [])
 
     answer_messages = build_answer_messages(messages, tool_results)
 
-    chunks = []
-    async for token in stream_chat(answer_messages, think=False):
-        chunks.append(token)
-        dispatch_custom_event("token", {"content": token})
+    with log_stage(
+        "answer_agent", request_id, tool_results_count=len(tool_results)
+    ) as log_result:
+        chunks = []
+        async for token in stream_chat(
+            answer_messages, think=False, request_id=request_id, stage_hint="answer"
+        ):
+            chunks.append(token)
+            dispatch_custom_event("token", {"content": token})
 
-    final_answer = "".join(chunks).strip()
+        final_answer = "".join(chunks).strip()
 
-    if not final_answer:
-        final_answer = FALLBACK_ANSWER
+        if not final_answer:
+            final_answer = FALLBACK_ANSWER
+
+        log_result["final_answer_length"] = len(final_answer)
 
     return {"final_answer": final_answer}

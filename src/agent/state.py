@@ -9,6 +9,13 @@ from typing import List, Optional, TypedDict
 
 
 class GraphState(TypedDict, total=False):
+    # 요청 1건을 식별하는 고유 ID. FastAPI 진입점(agent/graph.py의 run_agent /
+    # run_agent_stream)에서 최초 1회 발급되어 전 노드에 그대로 전달된다.
+    # logging_config.log_stage()에 넘겨서, 하나의 질문이 거친 모든 단계
+    # (router_agent -> mcp_tool_call -> kg_query_generation -> ... -> answer)를
+    # 이 값 하나로 grep/조인할 수 있게 한다.
+    request_id: str
+
     # Open WebUI가 보낸 전체 대화 히스토리 (OpenAI 포맷: role/content dict 리스트)
     # Answer Agent만 사용 — 자연스러운 대화 연속성 + tool_results 근거 답변용.
     # Base/Router Agent는 이 필드를 참조하지 않는다 (question만 사용).

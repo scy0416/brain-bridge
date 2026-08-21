@@ -12,6 +12,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from agent.state import GraphState
+from utils.logging_config import log_stage
 
 # "mcp-server"는 docker-compose.yml에 정의된 별도 컨테이너의 서비스 이름.
 # app 컨테이너에서는 Compose 네트워크를 통해 이 이름으로 접근한다.
@@ -36,30 +37,38 @@ async def tool_execution_node(state: GraphState) -> dict:
     :return: state에 병합될 부분 딕셔너리 {"tool_results": [...]}
     """
     router_tools = state.get("router_tools", [])
+    request_id = state["request_id"]
     tool_results = []
 
     for call in router_tools:
         name = call["name"]
         args = call["args"]
 
-        try:
-            mcp_result = await _call_tool_via_mcp(name, args)
-            tool_results.append(
-                {
-                    "tool": name,
-                    "args": args,
-                    "success": True,
-                    "result": mcp_result,
-                }
-            )
-        except Exception as e:
-            tool_results.append(
-                {
-                    "tool": name,
-                    "args": args,
-                    "success": False,
-                    "error": str(e),
-                }
-            )
+        with log_stage("mcp_tool_call", request_id, tool_name=name, args=args) as log_result:
+            try:
+                # request_id를 args에 섞어서 mcp-server 컨테이너의 도구 함수(예:
+                # knowledge_graph_tool)까지 전달한다. 도구 쪽에서 request_id를
+                # 별도 키워드 인자로 꺼내 쓰고, 실제 도구 로직에는 넘기지 않도록
+                # 각 tools/*.py 구현에서 pop 처리가 필요하다.
+                mcp_result = await _call_tool_via_mcp(name, {**args, "request_id": request_id})
+                log_result["result_size_chars"] = len(str(mcp_result))
+                tool_results.append(
+                    {
+                        "tool": name,
+                        "args": args,
+                        "success": True,
+                        "result": mcp_result,
+                    }
+                )
+            except Exception as e:
+                log_result["error"] = str(e)
+                tool_results.append(
+                    {
+                        "tool": name,
+                        "args": args,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
 
     return {"tool_results": tool_results}

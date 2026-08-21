@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
 from agent.graph import run_agent, run_agent_stream
+from utils.logging_config import new_request_id
 from api.schemas import (
     ChatCompletionChoice,
     ChatCompletionChunk,
@@ -59,7 +60,7 @@ def _format_sse(chunk: ChatCompletionChunk) -> str:
     return f"data: {chunk.model_dump_json()}\n\n"
 
 
-async def _stream_chat_completions(messages: list[dict], model: str):
+async def _stream_chat_completions(messages: list[dict], model: str, request_id: str):
     """run_agent_stream의 이벤트를 OpenAI 호환 SSE 청크로 변환해 순차 전달.
 
     progress 이벤트는 delta.reasoning_content로, token 이벤트는 delta.content
@@ -104,7 +105,7 @@ async def _stream_chat_completions(messages: list[dict], model: str):
     )
     yield _format_sse(first_chunk)
 
-    async for event in run_agent_stream(messages):
+    async for event in run_agent_stream(messages, request_id=request_id):
         if event["type"] == "progress":
             yield _format_sse(_reasoning_chunk(f"{event['message']}\n"))
 
@@ -130,13 +131,20 @@ async def chat_completions(request: ChatCompletionRequest):
     # 모델을 전혀 모르는 순수 인터페이스이므로 여기서 변환 책임을 진다.
     messages = [m.model_dump() for m in request.messages]
 
+    # 요청 1건당 고유 ID를 여기서 1회 발급한다. 이후 그래프 내부의 모든
+    # 노드(router_agent, mcp_tool_call, kg_query_generation/kg_db_execution/
+    # kg_formatting, answer 등)가 이 값을 state["request_id"]로 공유하며
+    # 로그를 남기므로, scripts/analyze_logs.py에서 이 request_id 하나로
+    # 요청 하나가 거친 전체 흐름과 각 단계 소요시간을 추적할 수 있다.
+    request_id = new_request_id()
+
     if request.stream:
         return StreamingResponse(
-            _stream_chat_completions(messages, request.model),
+            _stream_chat_completions(messages, request.model, request_id),
             media_type="text/event-stream",
         )
 
-    answer = await run_agent(messages)
+    answer = await run_agent(messages, request_id=request_id)
 
     return ChatCompletionResponse(
         id=f"chatcmpl-{uuid.uuid4().hex}",
